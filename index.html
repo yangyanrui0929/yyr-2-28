@@ -122,10 +122,22 @@
                     <div id="broadcast" class="tab-pane">
                         <h3>选择播报内容</h3>
                         <div class="broadcast-list" id="broadcastList"></div>
+                        
+                        <div class="tone-section">
+                            <h4>🎚️ 语气调校</h4>
+                            <p class="tone-section-desc">调整播报语气比例，影响民心、信任、谣言和噪音</p>
+                            <div id="toneMixContainer" class="tone-mix-container"></div>
+                        </div>
+                        
                         <div class="broadcast-preview" id="broadcastPreview">
                             <p>请选择要播报的消息...</p>
                         </div>
                         <button id="doBroadcastBtn" class="btn btn-primary" disabled>开始播报</button>
+                        
+                        <div class="broadcast-history-section">
+                            <h4>📜 播出记录</h4>
+                            <div id="broadcastHistory" class="broadcast-history"></div>
+                        </div>
                     </div>
 
                     <div id="qa" class="tab-pane">

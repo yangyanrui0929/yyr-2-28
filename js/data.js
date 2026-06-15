@@ -94,6 +94,42 @@ const GameData = {
         }
     ],
 
+    toneTypes: [
+        { id: 'comfort', name: '安抚', icon: '🕊️', desc: '安抚听众情绪', color: '#2ecc71' },
+        { id: 'warning', name: '警告', icon: '⚠️', desc: '发出危险警示', color: '#e74c3c' },
+        { id: 'factual', name: '事实说明', icon: '📋', desc: '客观陈述事实', color: '#3498db' },
+        { id: 'mobilize', name: '动员', icon: '📢', desc: '鼓动大家行动', color: '#f39c12' },
+        { id: 'withhold', name: '保留信息', icon: '🤫', desc: '隐瞒部分信息', color: '#9b59b6' }
+    ],
+
+    toneEffects: {
+        comfort: {
+            base: { morale: 8, trust: -2, rumor: 0, noise: -2 },
+            overtone: { morale: -5, trust: -8, rumor: 10 },
+            threshold: 50
+        },
+        warning: {
+            base: { morale: -3, trust: 10, rumor: -8, noise: 3 },
+            overtone: { morale: -10, trust: -5, rumor: 12 },
+            threshold: 45
+        },
+        factual: {
+            base: { morale: 2, trust: 6, rumor: -3, noise: 0 },
+            overtone: { morale: -2, trust: -2, rumor: 2 },
+            threshold: 70
+        },
+        mobilize: {
+            base: { morale: 6, trust: 4, rumor: -2, noise: 5 },
+            overtone: { morale: -3, trust: -3, noise: 8 },
+            threshold: 50
+        },
+        withhold: {
+            base: { morale: -2, trust: -4, rumor: 5, noise: -5 },
+            overtone: { morale: -8, trust: -10, rumor: 15 },
+            threshold: 35
+        }
+    },
+
     broadcastMessages: [
         { id: 'safe_zone', title: '📍 安全区通知', content: '城西区已确认安全，幸存者可前往临时避难所。', effects: { morale: 8, trust: 10, rumor: -5 }, power: 10 },
         { id: 'food_depot', title: '🍞 物资发放', content: '今日下午三点在中心广场发放应急物资，请携带身份证明。', effects: { morale: 12, trust: 8 }, power: 8 },

@@ -43,6 +43,14 @@ class UndergroundRadioGame {
                 evening: null
             },
             selectedBroadcast: null,
+            toneMix: {
+                comfort: 20,
+                warning: 20,
+                factual: 20,
+                mobilize: 20,
+                withhold: 20
+            },
+            broadcastHistory: [],
             currentQuestion: null,
             answeredQuestions: [],
             rumors: [],
@@ -161,6 +169,11 @@ class UndergroundRadioGame {
 
         if (tabName === 'qa' && !this.gameState.currentQuestion) {
             this.generateQuestion();
+        }
+        if (tabName === 'broadcast') {
+            this.renderToneMix();
+            this.renderTonePreview();
+            this.renderBroadcastHistory();
         }
     }
 
@@ -477,6 +490,130 @@ class UndergroundRadioGame {
         });
     }
 
+    calculateToneEffects() {
+        const { toneMix } = this.gameState;
+        const totalEffects = {
+            morale: 0,
+            trust: 0,
+            rumor: 0,
+            noise: 0
+        };
+
+        GameData.toneTypes.forEach(tone => {
+            const ratio = toneMix[tone.id] / 100;
+            const toneData = GameData.toneEffects[tone.id];
+            
+            Object.entries(toneData.base).forEach(([stat, value]) => {
+                totalEffects[stat] += value * ratio;
+            });
+
+            if (toneMix[tone.id] > toneData.threshold) {
+                const overRatio = (toneMix[tone.id] - toneData.threshold) / (100 - toneData.threshold);
+                Object.entries(toneData.overtone).forEach(([stat, value]) => {
+                    totalEffects[stat] += value * overRatio * ratio;
+                });
+            }
+        });
+
+        return totalEffects;
+    }
+
+    getToneWarnings() {
+        const { toneMix } = this.gameState;
+        const warnings = [];
+
+        if (toneMix.comfort > GameData.toneEffects.comfort.threshold) {
+            warnings.push({ tone: 'comfort', text: '过度安抚显得粉饰太平，听众开始不信任' });
+        }
+        if (toneMix.warning > GameData.toneEffects.warning.threshold) {
+            warnings.push({ tone: 'warning', text: '过度警告制造恐慌，民心下降' });
+        }
+        if (toneMix.mobilize > GameData.toneEffects.mobilize.threshold) {
+            warnings.push({ tone: 'mobilize', text: '过度动员导致噪音增大' });
+        }
+        if (toneMix.withhold > GameData.toneEffects.withhold.threshold) {
+            warnings.push({ tone: 'withhold', text: '信息保留过多，谣言开始滋生' });
+        }
+
+        return warnings;
+    }
+
+    updateToneMix(toneId, value) {
+        value = parseInt(value);
+        if (isNaN(value) || value < 0 || value > 100) return;
+
+        const oldValue = this.gameState.toneMix[toneId];
+        const diff = value - oldValue;
+        
+        if (diff === 0) return;
+
+        const otherTones = GameData.toneTypes.filter(t => t.id !== toneId);
+        const otherTotal = otherTones.reduce((sum, t) => sum + this.gameState.toneMix[t.id], 0);
+        
+        if (otherTotal === 0) {
+            const equalShare = 100 - value;
+            otherTones.forEach(t => {
+                this.gameState.toneMix[t.id] = equalShare / otherTones.length;
+            });
+        } else {
+            const ratio = (otherTotal - diff) / otherTotal;
+            if (ratio >= 0) {
+                otherTones.forEach(t => {
+                    this.gameState.toneMix[t.id] = Math.max(0, this.gameState.toneMix[t.id] * ratio);
+                });
+            }
+        }
+
+        this.gameState.toneMix[toneId] = value;
+
+        const total = Object.values(this.gameState.toneMix).reduce((a, b) => a + b, 0);
+        if (total !== 100) {
+            const scale = 100 / total;
+            Object.keys(this.gameState.toneMix).forEach(k => {
+                this.gameState.toneMix[k] = Math.round(this.gameState.toneMix[k] * scale * 10) / 10;
+            });
+        }
+
+        this.updateToneSlidersUI();
+        this.renderTonePreview();
+    }
+
+    updateToneSlidersUI() {
+        const container = document.getElementById('toneMixContainer');
+        if (!container) return;
+
+        const sliders = container.querySelectorAll('.tone-slider');
+        const valueDisplays = container.querySelectorAll('.tone-value');
+        const warningTexts = container.querySelectorAll('.tone-warning');
+
+        GameData.toneTypes.forEach((tone, index) => {
+            const value = this.gameState.toneMix[tone.id];
+            if (sliders[index]) {
+                sliders[index].value = value;
+            }
+            if (valueDisplays[index]) {
+                valueDisplays[index].textContent = Math.round(value) + '%';
+            }
+        });
+
+        const toneItems = container.querySelectorAll('.tone-item');
+        toneItems.forEach((item, index) => {
+            const tone = GameData.toneTypes[index];
+            const value = this.gameState.toneMix[tone.id];
+            const isOverThreshold = value > GameData.toneEffects[tone.id].threshold;
+            
+            let warningEl = item.querySelector('.tone-warning');
+            if (isOverThreshold && !warningEl) {
+                warningEl = document.createElement('div');
+                warningEl.className = 'tone-warning';
+                warningEl.textContent = '⚠️ 已超过阈值';
+                item.appendChild(warningEl);
+            } else if (!isOverThreshold && warningEl) {
+                warningEl.remove();
+            }
+        });
+    }
+
     getStatName(stat) {
         const names = {
             power: '⚡电量',
@@ -499,21 +636,126 @@ class UndergroundRadioGame {
 
     selectBroadcast(broadcastId) {
         this.gameState.selectedBroadcast = broadcastId;
-        
-        const msg = GameData.broadcastMessages.find(m => m.id === broadcastId);
+        this.renderTonePreview();
+        this.renderBroadcasts();
+    }
+
+    renderToneMix() {
+        const container = document.getElementById('toneMixContainer');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        GameData.toneTypes.forEach(tone => {
+            const item = document.createElement('div');
+            item.className = 'tone-item';
+            
+            const value = this.gameState.toneMix[tone.id];
+            const isOverThreshold = value > GameData.toneEffects[tone.id].threshold;
+            
+            item.innerHTML = `
+                <div class="tone-header">
+                    <span class="tone-icon" style="color:${tone.color}">${tone.icon}</span>
+                    <span class="tone-name">${tone.name}</span>
+                    <span class="tone-value" style="color:${tone.color}">${Math.round(value)}%</span>
+                </div>
+                <div class="tone-slider-container">
+                    <input type="range" class="tone-slider" data-tone="${tone.id}" 
+                           min="0" max="100" value="${value}" 
+                           style="accent-color: ${tone.color}">
+                    <div class="tone-threshold-marker" style="left: ${GameData.toneEffects[tone.id].threshold}%" title="警戒阈值"></div>
+                </div>
+                <div class="tone-desc">${tone.desc}</div>
+                ${isOverThreshold ? '<div class="tone-warning">⚠️ 已超过阈值</div>' : ''}
+            `;
+            
+            container.appendChild(item);
+        });
+
+        container.querySelectorAll('.tone-slider').forEach(slider => {
+            slider.addEventListener('input', (e) => {
+                this.updateToneMix(e.target.dataset.tone, e.target.value);
+            });
+        });
+    }
+
+    renderTonePreview() {
         const preview = document.getElementById('broadcastPreview');
-        
-        const effectsText = Object.entries(msg.effects)
+        if (!preview) return;
+
+        const msg = this.gameState.selectedBroadcast 
+            ? GameData.broadcastMessages.find(m => m.id === this.gameState.selectedBroadcast)
+            : null;
+
+        if (!msg) {
+            preview.innerHTML = '<p>请选择要播报的消息...</p>';
+            return;
+        }
+
+        const toneEffects = this.calculateToneEffects();
+        const warnings = this.getToneWarnings();
+
+        const combinedEffects = {};
+        Object.entries(msg.effects).forEach(([k, v]) => {
+            combinedEffects[k] = v;
+        });
+        Object.entries(toneEffects).forEach(([k, v]) => {
+            if (combinedEffects[k] === undefined) combinedEffects[k] = 0;
+            combinedEffects[k] += v;
+        });
+
+        const baseEffectsText = Object.entries(msg.effects)
             .map(([k, v]) => `${this.getStatName(k)} ${v > 0 ? '+' : ''}${v}`)
             .join(' | ');
-        
+
+        const toneEffectsText = Object.entries(toneEffects)
+            .filter(([_, v]) => Math.abs(v) >= 0.1)
+            .map(([k, v]) => `${this.getStatName(k)} ${v > 0 ? '+' : ''}${v.toFixed(1)}`)
+            .join(' | ');
+
+        const combinedEffectsText = Object.entries(combinedEffects)
+            .filter(([_, v]) => Math.abs(v) >= 0.1)
+            .map(([k, v]) => {
+                const rounded = Math.round(v * 10) / 10;
+                return `${this.getStatName(k)} ${rounded > 0 ? '+' : ''}${rounded}`;
+            })
+            .join(' | ');
+
+        let warningsHtml = '';
+        if (warnings.length > 0) {
+            warningsHtml = '<div class="tone-warnings">';
+            warnings.forEach(w => {
+                const toneData = GameData.toneTypes.find(t => t.id === w.tone);
+                warningsHtml += `<div class="tone-warning-item" style="border-color: ${toneData.color}">
+                    <span>${toneData.icon}</span> ${w.text}
+                </div>`;
+            });
+            warningsHtml += '</div>';
+        }
+
         preview.innerHTML = `
             <h4 style="color:#e94560; margin-bottom:10px">${msg.title}</h4>
-            <p>${msg.content}</p>
-            <p style="color:#888; font-size:12px; margin-top:10px">效果: ${effectsText} | 耗电: ⚡${msg.power}</p>
+            <p style="margin-bottom:15px">${msg.content}</p>
+            
+            <div class="preview-section">
+                <div class="preview-label">消息基础效果</div>
+                <div class="preview-effects base">${baseEffectsText}</div>
+            </div>
+            
+            <div class="preview-section">
+                <div class="preview-label">语气调校效果</div>
+                <div class="preview-effects tone">${toneEffectsText || '无'}</div>
+            </div>
+            
+            ${warningsHtml}
+            
+            <div class="preview-section total">
+                <div class="preview-label">预计综合效果</div>
+                <div class="preview-effects combined">${combinedEffectsText || '无'}</div>
+            </div>
+            
+            <p style="color:#888; font-size:12px; margin-top:15px">耗电: ⚡${msg.power}</p>
         `;
-        
-        this.renderBroadcasts();
     }
 
     doBroadcast() {
@@ -525,19 +767,96 @@ class UndergroundRadioGame {
             return;
         }
 
-        this.applyEffects(msg.effects);
+        const toneEffects = this.calculateToneEffects();
+        
+        const combinedEffects = {};
+        Object.entries(msg.effects).forEach(([k, v]) => {
+            combinedEffects[k] = v;
+        });
+        Object.entries(toneEffects).forEach(([k, v]) => {
+            if (combinedEffects[k] === undefined) combinedEffects[k] = 0;
+            combinedEffects[k] += v;
+        });
+
+        this.applyEffects(combinedEffects);
         this.gameState.status.power -= msg.power;
         this.gameState.todayActions.broadcastDone = true;
 
-        const effectTags = Object.entries(msg.effects)
-            .filter(([_, v]) => v !== 0)
-            .map(([k, v]) => ({
-                text: `${this.getStatName(k)} ${v > 0 ? '+' : ''}${v}`,
-                type: v > 0 ? 'positive' : 'negative'
-            }));
+        const broadcastRecord = {
+            id: 'broadcast_' + Date.now(),
+            day: this.gameState.day,
+            messageId: msg.id,
+            title: msg.title,
+            content: msg.content,
+            toneMix: { ...this.gameState.toneMix },
+            effects: { ...combinedEffects },
+            baseEffects: { ...msg.effects },
+            toneEffects: { ...toneEffects }
+        };
+        this.gameState.broadcastHistory.unshift(broadcastRecord);
 
-        this.showEvent('播报完成', `已播报：${msg.title}`, effectTags);
+        const effectTags = Object.entries(combinedEffects)
+            .filter(([_, v]) => Math.abs(v) >= 0.1)
+            .map(([k, v]) => {
+                const rounded = Math.round(v * 10) / 10;
+                return {
+                    text: `${this.getStatName(k)} ${rounded > 0 ? '+' : ''}${rounded}`,
+                    type: v > 0 ? 'positive' : 'negative'
+                };
+            });
+
+        const warnings = this.getToneWarnings();
+        let extraText = '';
+        if (warnings.length > 0) {
+            extraText = '\n\n注意：' + warnings.map(w => w.text).join('；');
+        }
+
+        this.showEvent('播报完成', `已播报：${msg.title}${extraText}`, effectTags);
+        this.renderBroadcastHistory();
         this.renderAll();
+    }
+
+    renderBroadcastHistory() {
+        const container = document.getElementById('broadcastHistory');
+        if (!container) return;
+
+        if (this.gameState.broadcastHistory.length === 0) {
+            container.innerHTML = '<p style="color:#888; text-align:center; padding:20px">暂无播出记录</p>';
+            return;
+        }
+
+        let html = '';
+        this.gameState.broadcastHistory.forEach(record => {
+            const toneBars = GameData.toneTypes.map(tone => {
+                const value = record.toneMix[tone.id] || 0;
+                return `<div class="history-tone-bar" style="background:${tone.color}; width:${value}%" title="${tone.name}: ${Math.round(value)}%"></div>`;
+            }).join('');
+
+            const effectTags = Object.entries(record.effects)
+                .filter(([_, v]) => Math.abs(v) >= 0.1)
+                .map(([k, v]) => {
+                    const rounded = Math.round(v * 10) / 10;
+                    const className = v > 0 ? 'positive' : 'negative';
+                    return `<span class="effect-tag ${className}">${this.getStatName(k)} ${rounded > 0 ? '+' : ''}${rounded}</span>`;
+                }).join('');
+
+            html += `
+                <div class="broadcast-history-item">
+                    <div class="history-header">
+                        <span class="history-day">第 ${record.day} 天</span>
+                        <span class="history-title">${record.title}</span>
+                    </div>
+                    <div class="history-tone-mix">
+                        ${toneBars}
+                    </div>
+                    <div class="history-effects">
+                        ${effectTags}
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
     }
 
     generateQuestion() {

@@ -543,39 +543,87 @@ class UndergroundRadioGame {
         if (isNaN(value) || value < 0 || value > 100) return;
 
         const oldValue = this.gameState.toneMix[toneId];
-        const diff = value - oldValue;
-        
-        if (diff === 0) return;
+        if (value === oldValue) return;
 
         const otherTones = GameData.toneTypes.filter(t => t.id !== toneId);
         const otherTotal = otherTones.reduce((sum, t) => sum + this.gameState.toneMix[t.id], 0);
-        
-        if (otherTotal === 0) {
-            const equalShare = 100 - value;
+        const remaining = 100 - value;
+
+        if (remaining <= 0 || otherTotal <= 0) {
+            const equalShare = remaining / otherTones.length;
             otherTones.forEach(t => {
-                this.gameState.toneMix[t.id] = equalShare / otherTones.length;
+                this.gameState.toneMix[t.id] = Math.max(0, equalShare);
             });
         } else {
-            const ratio = (otherTotal - diff) / otherTotal;
-            if (ratio >= 0) {
-                otherTones.forEach(t => {
-                    this.gameState.toneMix[t.id] = Math.max(0, this.gameState.toneMix[t.id] * ratio);
-                });
-            }
+            const ratio = remaining / otherTotal;
+            otherTones.forEach(t => {
+                this.gameState.toneMix[t.id] = this.gameState.toneMix[t.id] * ratio;
+            });
         }
 
         this.gameState.toneMix[toneId] = value;
 
-        const total = Object.values(this.gameState.toneMix).reduce((a, b) => a + b, 0);
-        if (total !== 100) {
-            const scale = 100 / total;
-            Object.keys(this.gameState.toneMix).forEach(k => {
-                this.gameState.toneMix[k] = Math.round(this.gameState.toneMix[k] * scale * 10) / 10;
-            });
-        }
-
+        this.normalizeToneMix(toneId);
         this.updateToneSlidersUI();
         this.renderTonePreview();
+    }
+
+    normalizeToneMix(fixedToneId) {
+        const toneIds = GameData.toneTypes.map(t => t.id);
+        
+        toneIds.forEach(id => {
+            this.gameState.toneMix[id] = Math.round(this.gameState.toneMix[id] * 10) / 10;
+        });
+
+        const total = toneIds.reduce((sum, id) => sum + this.gameState.toneMix[id], 0);
+        const diff = Math.round((100 - total) * 10) / 10;
+
+        if (Math.abs(diff) >= 0.1) {
+            const otherIds = toneIds.filter(id => id !== fixedToneId);
+            if (otherIds.length > 0) {
+                const largestOther = otherIds.reduce((a, b) => 
+                    this.gameState.toneMix[a] >= this.gameState.toneMix[b] ? a : b
+                );
+                this.gameState.toneMix[largestOther] += diff;
+                this.gameState.toneMix[largestOther] = Math.max(0, this.gameState.toneMix[largestOther]);
+            } else {
+                this.gameState.toneMix[fixedToneId] += diff;
+            }
+        }
+
+        toneIds.forEach(id => {
+            this.gameState.toneMix[id] = Math.round(this.gameState.toneMix[id] * 10) / 10;
+        });
+    }
+
+    getDisplayPercentages() {
+        const values = GameData.toneTypes.map(t => ({
+            id: t.id,
+            value: this.gameState.toneMix[t.id],
+            floor: Math.floor(this.gameState.toneMix[t.id])
+        }));
+
+        const floorTotal = values.reduce((sum, v) => sum + v.floor, 0);
+        const remainder = 100 - floorTotal;
+
+        values.sort((a, b) => (b.value - b.floor) - (a.value - a.floor));
+
+        for (let i = 0; i < remainder && i < values.length; i++) {
+            values[i].display = values[i].floor + 1;
+        }
+
+        values.forEach(v => {
+            if (v.display === undefined) {
+                v.display = v.floor;
+            }
+        });
+
+        const result = {};
+        values.forEach(v => {
+            result[v.id] = v.display;
+        });
+
+        return result;
     }
 
     updateToneSlidersUI() {
@@ -584,7 +632,7 @@ class UndergroundRadioGame {
 
         const sliders = container.querySelectorAll('.tone-slider');
         const valueDisplays = container.querySelectorAll('.tone-value');
-        const warningTexts = container.querySelectorAll('.tone-warning');
+        const displayPercentages = this.getDisplayPercentages();
 
         GameData.toneTypes.forEach((tone, index) => {
             const value = this.gameState.toneMix[tone.id];
@@ -592,7 +640,7 @@ class UndergroundRadioGame {
                 sliders[index].value = value;
             }
             if (valueDisplays[index]) {
-                valueDisplays[index].textContent = Math.round(value) + '%';
+                valueDisplays[index].textContent = displayPercentages[tone.id] + '%';
             }
         });
 
